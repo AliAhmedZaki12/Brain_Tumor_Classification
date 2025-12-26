@@ -2,6 +2,3 @@ streamlit==1.32.2
 tensorflow-cpu==2.13.0
 numpy==1.24.3
 pillow
-
-
-
