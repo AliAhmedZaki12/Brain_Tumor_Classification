@@ -1,12 +1,6 @@
-# واجهة المستخدم
 streamlit
-rich
-altair
-
-# التعلم العميق
-tensorflow-cpu
-
-# علم البيانات والمعالجة
+tensorflow
 numpy
+pandas
+opencv-python-headless
 Pillow
-
