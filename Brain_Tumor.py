@@ -1,3 +1,8 @@
+# ===============================
+# 🧠 Brain Tumor Detection App
+# Compatible with legacy .h5 models
+# ===============================
+
 import streamlit as st
 import numpy as np
 import tensorflow as tf
@@ -6,7 +11,10 @@ from PIL import Image
 import cv2
 import pandas as pd
 
-st.set_page_config(page_title="Brain Tumor Detection", layout="centered")
+st.set_page_config(
+    page_title="Brain Tumor Detection",
+    layout="centered"
+)
 
 # ===============================
 # 🔹 Load Model
@@ -18,32 +26,47 @@ def load_trained_model():
 model = load_trained_model()
 
 # ===============================
-# 🔹 Detect Model Input
+# 🔹 Class Names (FIXED)
+# ===============================
+CLASS_NAMES = [
+    "glioma",
+    "meningioma",
+    "notumor",
+    "pituitary"
+]
+
+NUM_CLASSES = len(CLASS_NAMES)
+
+# ===============================
+# 🔹 Detect Model Input Type
 # ===============================
 INPUT_SHAPE = model.input_shape  # (None, N) OR (None, H, W, C)
 
 if len(INPUT_SHAPE) == 2:
     MODEL_TYPE = "VECTOR"
     VECTOR_SIZE = INPUT_SHAPE[1]
+
 elif len(INPUT_SHAPE) == 4:
     MODEL_TYPE = "IMAGE"
     IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS = INPUT_SHAPE[1:]
+
 else:
-    st.error(f"Unsupported model input shape: {INPUT_SHAPE}")
+    st.error(f"❌ Unsupported model input shape: {INPUT_SHAPE}")
     st.stop()
 
 # ===============================
-# 🔹 Preprocessing
+# 🔹 Preprocess Image
 # ===============================
 def preprocess_image(image: Image.Image):
     image = np.array(image.convert("RGB"))
 
+    # ===== Image-based model =====
     if MODEL_TYPE == "IMAGE":
         image = cv2.resize(image, (IMG_WIDTH, IMG_HEIGHT))
         image = image.astype("float32") / 255.0
         return np.expand_dims(image, axis=0)
 
-    # ===== VECTOR MODEL =====
+    # ===== Vector-based model =====
     image = cv2.resize(image, (224, 224))
     image = image.astype("float32") / 255.0
     vector = image.flatten()
@@ -66,14 +89,21 @@ uploaded_file = st.file_uploader(
     type=["jpg", "jpeg", "png"]
 )
 
-CLASS_NAMES = ["Glioma", "Meningioma", "No Tumor", "Pituitary"]
-
 if uploaded_file:
     image = Image.open(uploaded_file)
     st.image(image, caption="Uploaded Image", use_container_width=True)
 
     processed = preprocess_image(image)
     preds = model.predict(processed, verbose=0)[0]
+
+    # ===== Safety: match output size =====
+    preds = preds[:NUM_CLASSES]
+
+    if preds.ndim != 1 or preds.shape[0] != NUM_CLASSES:
+        st.error(
+            f"❌ Model output shape mismatch: expected {NUM_CLASSES}, got {preds.shape}"
+        )
+        st.stop()
 
     df = pd.DataFrame({
         "Tumor Type": CLASS_NAMES,
@@ -89,4 +119,4 @@ if uploaded_file:
         f"with confidence **{top['Probability (%)']}%**"
     )
 
-st.caption("Compatible with legacy models | No retraining required")
+st.caption("Legacy model compatible | No retraining required")
