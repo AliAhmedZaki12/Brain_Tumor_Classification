@@ -1,55 +1,70 @@
-# app.py
+# brain_tumor_app.py
+
 import streamlit as st
-import numpy as np
 from PIL import Image
+import numpy as np
+import tensorflow as tf
 from tensorflow.keras.models import load_model
 import json
 
-# -----------------------------
-# 1️⃣ تحميل النموذج وملف الفئات
-# -----------------------------
-model = load_model("brain_tumor_model.h5")
+# ==========================
+# إعدادات الصفحة
+# ==========================
+st.set_page_config(page_title="Brain Tumor Classifier", layout="centered")
+st.title("🧠 Brain Tumor Classifier")
 
-with open("class_labels.json", "r") as f:
-    class_labels = json.load(f)
+# ==========================
+# تحميل النموذج والفئات
+# ==========================
+@st.cache_resource
+def load_model_and_labels():
+    model = load_model("brain_tumor_model.h5")
+    with open("class_labels.json", "r") as f:
+        class_labels = json.load(f)
+    return model, class_labels
 
-# استخراج حجم الإدخال من النموذج تلقائيًا
-input_shape = model.input_shape[1:3]  # (height, width)
+model, class_labels = load_model_and_labels()
 
-# -----------------------------
-# 2️⃣ دالة المعالجة المسبقة
-# -----------------------------
-def preprocess_image(image_file, target_size=input_shape):
-    """
-    تقرأ الصورة، تحولها إلى RGB، تغير حجمها لتتناسب مع النموذج،
-    وتعيدها على شكل numpy array مع batch dimension.
-    """
-    image = Image.open(image_file).convert('RGB')
-    image = image.resize(target_size)
-    image_array = np.array(image, dtype=np.float32) / 255.0
-    image_array = np.expand_dims(image_array, axis=0)  # إضافة batch dimension
-    return image_array
+# ==========================
+# دالة المعالجة المسبقة للصورة
+# ==========================
+def preprocess_image(uploaded_file, target_size=(299, 299)):
+    if uploaded_file is None:
+        return None
 
-# -----------------------------
-# 3️⃣ واجهة Streamlit
-# -----------------------------
-st.title("Brain Tumor Classification")
-st.write("Upload any brain MRI image and the model will predict the tumor type.")
+    try:
+        # تحويل الصورة لـ RGB وضبط الحجم
+        image = Image.open(uploaded_file).convert("RGB")
+        image = image.resize(target_size)
+        
+        # تحويل لمصفوفة numpy وتطبيع القيم
+        image_array = np.array(image) / 255.0
+        
+        # إضافة بعد batch
+        image_array = np.expand_dims(image_array, axis=0)
+        return image_array
+    except Exception as e:
+        st.error(f"Error processing image: {e}")
+        return None
 
-uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
+# ==========================
+# واجهة المستخدم
+# ==========================
+uploaded_file = st.file_uploader("Upload a Brain MRI Image", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
+    st.image(uploaded_file, caption="Uploaded Image", use_column_width=True)
+    
     # معالجة الصورة
     processed_image = preprocess_image(uploaded_file)
     
-    # عرض الصورة
-    st.image(uploaded_file, caption="Uploaded Image", use_column_width=True)
-    
-    # التنبؤ
-    predictions = model.predict(processed_image, verbose=0)[0]
-    predicted_class = class_labels[np.argmax(predictions)]
-    confidence = np.max(predictions) * 100
-    
-    # عرض النتيجة
-    st.markdown(f"### Predicted Class: **{predicted_class}**")
-    st.markdown(f"### Confidence: **{confidence:.2f}%**")
+    if processed_image is not None:
+        # توقع النموذج
+        predictions = model.predict(processed_image, verbose=0)
+        pred_index = np.argmax(predictions[0])
+        pred_label = class_labels[pred_index]
+        confidence = predictions[0][pred_index] * 100
+        
+        # عرض النتيجة
+        st.markdown(f"### Prediction: **{pred_label}**")
+        st.markdown(f"### Confidence: **{confidence:.2f}%**")
