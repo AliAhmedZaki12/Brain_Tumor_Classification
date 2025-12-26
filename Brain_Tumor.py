@@ -111,9 +111,5 @@ if uploaded_file:
         f"with confidence **{top['Probability (%)']}%**"
     )
 
-    st.warning(
-        "⚠️ This model is binary (tumor / no tumor). "
-        "Tumor subtype probabilities are approximated for visualization only."
-    )
-
-st.caption("Legacy binary model | Safe adapter | No retraining required")
+ 
+st.caption("Developed by Ali Ahmed Zaki")
