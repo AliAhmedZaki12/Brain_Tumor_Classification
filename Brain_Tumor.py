@@ -39,29 +39,37 @@ model = load_trained_model()
 CLASS_NAMES = ["glioma", "meningioma", "notumor", "pituitary"]
 
 # =====================================================
-# 🔹 Image Preprocessing
+# 🔹 Preprocessing ديناميكي لأي شكل إدخال
 # =====================================================
-IMG_SIZE = 224
-
 def preprocess_image(image: Image.Image):
     image = np.array(image)
 
-    # التعامل مع Grayscale أو RGB حسب شكل النموذج
-    if model.input_shape[-1] == 1:
-        # نموذج يتوقع channel=1
+    input_shape = model.input_shape
+    h, w = input_shape[1], input_shape[2]
+    channels = input_shape[-1]
+
+    # Vector Input (1D)
+    if len(input_shape) == 2:
+        vec = cv2.resize(image, (IMG_SIZE, IMG_SIZE)) if len(image.shape) == 3 else image
+        vec = vec.flatten().astype("float32") / 255.0
+        vec = np.pad(vec, (0, max(0, input_shape[1] - vec.shape[0])), constant_values=0)
+        return np.expand_dims(vec, axis=0)
+
+    # Image Input (3D)
+    if channels == 1:
         if len(image.shape) == 3 and image.shape[2] == 3:
             image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-        image = image[..., np.newaxis]  # shape -> (H,W,1)
+        image = image[..., np.newaxis]
     else:
-        # RGB
-        if len(image.shape) == 2:  # صورة grayscale
+        if len(image.shape) == 2:
             image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
-        image = image[..., :3]  # التأكد من وجود 3 قنوات
+        image = image[..., :3]
 
-    # Resize وتطبيع
-    image = cv2.resize(image, (IMG_SIZE, IMG_SIZE))
+    image = cv2.resize(image, (w, h))
     image = image.astype("float32") / 255.0
     return np.expand_dims(image, axis=0)
+
+IMG_SIZE = 224  # للـ Vector Input أو كحجم افتراضي
 
 # =====================================================
 # 🖥️ UI
@@ -84,10 +92,15 @@ if uploaded_file:
     st.image(image, caption="Uploaded MRI Image", width=350)
 
     processed = preprocess_image(image)
-    st.write("Processed image shape:", processed.shape)
+    st.write("Processed input shape:", processed.shape)
 
-    # التنبؤ الاحتمالي للورم
-    p_tumor = float(model.predict(processed, verbose=0)[0][0])
+    # Binary prediction
+    raw_pred = model.predict(processed, verbose=0)
+    try:
+        p_tumor = float(raw_pred[0][0])
+    except:
+        # إذا كان Vector output أو شكل مختلف
+        p_tumor = float(raw_pred[0])
     p_notumor = 1 - p_tumor
 
     # =================================================
@@ -142,4 +155,3 @@ if uploaded_file:
 # 🔻 Footer
 # =====================================================
 st.caption("Developed by Ali Ahmed Zaki")
-
