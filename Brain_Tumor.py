@@ -23,9 +23,12 @@ st.set_page_config(
 @st.cache_resource
 def load_trained_model():
     try:
-        return load_model("brain_tumor_model.h5", compile=False)
+        model = load_model("brain_tumor_model.h5", compile=False)
+        st.success("✅ Binary model loaded successfully!")
+        st.write("Model input shape:", model.input_shape)
+        return model
     except FileNotFoundError:
-        st.error("❌ لم يتم العثور على نموذج الـ Binary. تأكد من رفع الملف brain_tumor_model.h5")
+        st.error("❌ لم يتم العثور على نموذج Binary. تأكد من رفع الملف brain_tumor_model.h5 في نفس مجلد app.py")
         st.stop()
 
 model = load_trained_model()
@@ -41,7 +44,21 @@ CLASS_NAMES = ["glioma", "meningioma", "notumor", "pituitary"]
 IMG_SIZE = 224
 
 def preprocess_image(image: Image.Image):
-    image = np.array(image.convert("RGB"))
+    image = np.array(image)
+
+    # التعامل مع Grayscale أو RGB حسب شكل النموذج
+    if model.input_shape[-1] == 1:
+        # نموذج يتوقع channel=1
+        if len(image.shape) == 3 and image.shape[2] == 3:
+            image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        image = image[..., np.newaxis]  # shape -> (H,W,1)
+    else:
+        # RGB
+        if len(image.shape) == 2:  # صورة grayscale
+            image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+        image = image[..., :3]  # التأكد من وجود 3 قنوات
+
+    # Resize وتطبيع
     image = cv2.resize(image, (IMG_SIZE, IMG_SIZE))
     image = image.astype("float32") / 255.0
     return np.expand_dims(image, axis=0)
@@ -51,7 +68,7 @@ def preprocess_image(image: Image.Image):
 # =====================================================
 st.title("🧠 Brain Tumor Detection System")
 st.write(
-    "Upload an MRI image to get predictions (binary model with estimated tumor type probabilities)."
+    "Upload an MRI image to get predictions (Binary model with estimated tumor type probabilities)."
 )
 
 uploaded_file = st.file_uploader(
@@ -67,6 +84,9 @@ if uploaded_file:
     st.image(image, caption="Uploaded MRI Image", width=350)
 
     processed = preprocess_image(image)
+    st.write("Processed image shape:", processed.shape)
+
+    # التنبؤ الاحتمالي للورم
     p_tumor = float(model.predict(processed, verbose=0)[0][0])
     p_notumor = 1 - p_tumor
 
@@ -122,3 +142,4 @@ if uploaded_file:
 # 🔻 Footer
 # =====================================================
 st.caption("Developed by Ali Ahmed Zaki")
+
