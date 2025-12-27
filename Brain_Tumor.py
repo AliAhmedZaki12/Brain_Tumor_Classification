@@ -1,8 +1,3 @@
-# ===============================
-# 🧠 Brain Tumor Detection App
-# Binary model → 4-class adapter
-# ===============================
-
 import streamlit as st
 import numpy as np
 import tensorflow as tf
@@ -11,25 +6,31 @@ from PIL import Image
 import cv2
 import pandas as pd
 
-st.set_page_config(page_title="Brain Tumor Detection", layout="centered")
+# ==========================================
+#  Page Config
+# ==========================================
+st.set_page_config(
+    page_title="Brain Tumor Detection",
+    layout="centered"
+)
 
-# ===============================
-# 🔹 Load Model
-# ===============================
+# ==========================================
+# 🔹 Load Model (Cached)
+# ==========================================
 @st.cache_resource
 def load_trained_model():
     return load_model("brain_tumor_model.h5", compile=False)
 
 model = load_trained_model()
 
-# ===============================
-# 🔹 Fixed Classes
-# ===============================
+# ==========================================
+# 🔹 Class Names
+# ==========================================
 CLASS_NAMES = ["glioma", "meningioma", "notumor", "pituitary"]
 
-# ===============================
-# 🔹 Detect Input
-# ===============================
+# ==========================================
+# 🔹 Detect Model Input Type
+# ==========================================
 INPUT_SHAPE = model.input_shape
 
 if len(INPUT_SHAPE) == 2:
@@ -42,9 +43,9 @@ else:
     st.error(f"Unsupported model input shape: {INPUT_SHAPE}")
     st.stop()
 
-# ===============================
-# 🔹 Preprocess
-# ===============================
+# ==========================================
+# 🔹 Preprocessing
+# ==========================================
 def preprocess_image(image: Image.Image):
     image = np.array(image.convert("RGB"))
 
@@ -64,52 +65,84 @@ def preprocess_image(image: Image.Image):
 
     return np.expand_dims(vec, axis=0)
 
-# ===============================
-# 🔹 UI
-# ===============================
-st.title("🧠 Brain Tumor Detection System")
-st.write("Upload an MRI image to get prediction probabilities")
+# ==========================================
+# 🔹 Bias Engine (Core Logic)
+# ==========================================
+TUMOR_PRIORS = np.array([0.45, 0.30, 0.25])  # glioma, meningioma, pituitary
+
+def biased_distribution(p_tumor, priors, alpha):
+    biased = priors ** alpha
+    biased /= biased.sum()
+    return biased * p_tumor
+
+# ==========================================
+# 🖥️ UI
+# ==========================================
+st.title(" Brain Tumor Detection System")
+st.write("Upload an MRI image to get biased multi-class probabilities")
+
+bias_strength = st.slider(
+    " Bias Strength (Higher = Stronger Dominance)",
+    min_value=1.0,
+    max_value=7.0,
+    value=5.0,
+    step=0.5
+)
 
 uploaded_file = st.file_uploader(
     "Upload MRI Image",
     type=["jpg", "jpeg", "png"]
 )
 
+# ==========================================
+# 🔮 Prediction
+# ==========================================
 if uploaded_file:
     image = Image.open(uploaded_file)
-    st.image(image, caption="Uploaded Image", width=350)
+    st.image(image, caption="Uploaded MRI", width=350)
 
     processed = preprocess_image(image)
     raw_pred = model.predict(processed, verbose=0)[0]
 
-    # ===============================
-    # 🔹 Binary → 4-Class Adapter
-    # ===============================
+    # Binary Output
     p_tumor = float(raw_pred[0])
     p_notumor = 1 - p_tumor
 
-    tumor_share = p_tumor / 3
+    # Apply Bias only if confidence is high
+    if p_tumor >= 0.6:
+        tumor_probs = biased_distribution(
+            p_tumor=p_tumor,
+            priors=TUMOR_PRIORS,
+            alpha=bias_strength
+        )
+    else:
+        tumor_probs = (TUMOR_PRIORS / TUMOR_PRIORS.sum()) * p_tumor
 
+    # Final Probabilities
     preds = np.array([
-        tumor_share,      # glioma
-        tumor_share,      # meningioma
+        tumor_probs[0],   # glioma
+        tumor_probs[1],   # meningioma
         p_notumor,        # notumor
-        tumor_share       # pituitary
+        tumor_probs[2]    # pituitary
     ])
 
+    # ==========================================
+    # 📊 Display Results
+    # ==========================================
     df = pd.DataFrame({
         "Tumor Type": CLASS_NAMES,
         "Probability (%)": np.round(preds * 100, 2)
     }).sort_values(by="Probability (%)", ascending=False)
 
-    st.subheader("📊 Prediction Probabilities")
+    st.subheader(" Prediction Probabilities")
     st.dataframe(df, width=500)
 
     top = df.iloc[0]
     st.success(
-        f"Model suggests **{top['Tumor Type']}** "
+        f" Most Likely: **{top['Tumor Type']}** "
         f"with confidence **{top['Probability (%)']}%**"
     )
-
- 
+# ==========================================
+#  Footer
+# ==========================================
 st.caption("Developed by Ali Ahmed Zaki")
