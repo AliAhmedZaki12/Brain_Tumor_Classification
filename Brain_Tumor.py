@@ -1,51 +1,50 @@
 import streamlit as st
 import numpy as np
-import tensorflow as tf
 from tensorflow.keras.models import load_model
 from PIL import Image
 import cv2
 import pandas as pd
 
-# ==========================================
-#  Page Config
-# ==========================================
+# =====================================================
+# 🔧 Page Config
+# =====================================================
 st.set_page_config(
     page_title="Brain Tumor Detection",
     layout="centered"
 )
 
-# ==========================================
-# 🔹 Load Model (Cached)
-# ==========================================
+# =====================================================
+# 🔹 Load Model
+# =====================================================
 @st.cache_resource
 def load_trained_model():
     return load_model("brain_tumor_model.h5", compile=False)
 
 model = load_trained_model()
 
-# ==========================================
-# 🔹 Class Names
-# ==========================================
+# =====================================================
+# 🔹 Classes
+# =====================================================
 CLASS_NAMES = ["glioma", "meningioma", "notumor", "pituitary"]
 
-# ==========================================
-# 🔹 Detect Model Input Type
-# ==========================================
+# =====================================================
+# 🔹 Detect Input Shape
+# =====================================================
 INPUT_SHAPE = model.input_shape
 
-if len(INPUT_SHAPE) == 2:
-    MODEL_TYPE = "VECTOR"
-    VECTOR_SIZE = INPUT_SHAPE[1]
-elif len(INPUT_SHAPE) == 4:
+if len(INPUT_SHAPE) == 4:
     MODEL_TYPE = "IMAGE"
     IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS = INPUT_SHAPE[1:]
+elif len(INPUT_SHAPE) == 2:
+    MODEL_TYPE = "VECTOR"
+    VECTOR_SIZE = INPUT_SHAPE[1]
 else:
     st.error(f"Unsupported model input shape: {INPUT_SHAPE}")
     st.stop()
 
-# ==========================================
+# =====================================================
 # 🔹 Preprocessing
-# ==========================================
+# =====================================================
 def preprocess_image(image: Image.Image):
     image = np.array(image.convert("RGB"))
 
@@ -65,27 +64,51 @@ def preprocess_image(image: Image.Image):
 
     return np.expand_dims(vec, axis=0)
 
-# ==========================================
-# 🔹 Bias Engine (Core Logic)
-# ==========================================
-TUMOR_PRIORS = np.array([0.45, 0.30, 0.25])  # glioma, meningioma, pituitary
+# =====================================================
+#  Confidence Amplification (Key Logic)
+# =====================================================
+def amplify_confidence(p, gamma=4.0):
+    """
+    Smooth non-linear confidence amplification
+    gamma ↑ => stronger confidence sharpening
+    """
+    return (p ** gamma) / ((p ** gamma) + ((1 - p) ** gamma))
 
-def biased_distribution(p_tumor, priors, alpha):
-    biased = priors ** alpha
-    biased /= biased.sum()
-    return biased * p_tumor
+def tumor_soft_bias(p_tumor, priors, beta=6.0):
+    """
+    Realistic soft dominance among tumor classes
+    """
+    weights = priors ** beta
+    weights /= weights.sum()
+    return weights * p_tumor
 
-# ==========================================
+# =====================================================
+# 🔹 Tumor Priors (Domain Bias)
+# =====================================================
+TUMOR_PRIORS = np.array([0.45, 0.30, 0.25])  
+# glioma, meningioma, pituitary
+
+# =====================================================
 # 🖥️ UI
-# ==========================================
+# =====================================================
 st.title(" Brain Tumor Detection System")
-st.write("Upload an MRI image to get biased multi-class probabilities")
+st.write(
+    "Upload an MRI image to get **realistic confidence-amplified predictions**"
+)
 
-bias_strength = st.slider(
-    " Bias Strength (Higher = Stronger Dominance)",
-    min_value=1.0,
-    max_value=7.0,
-    value=5.0,
+gamma = st.slider(
+    " Confidence Amplification (gamma)",
+    min_value=2.0,
+    max_value=6.0,
+    value=4.0,
+    step=0.5
+)
+
+beta = st.slider(
+    " Tumor Bias Strength (beta)",
+    min_value=2.0,
+    max_value=8.0,
+    value=6.0,
     step=0.5
 )
 
@@ -94,9 +117,9 @@ uploaded_file = st.file_uploader(
     type=["jpg", "jpeg", "png"]
 )
 
-# ==========================================
+# =====================================================
 # 🔮 Prediction
-# ==========================================
+# =====================================================
 if uploaded_file:
     image = Image.open(uploaded_file)
     st.image(image, caption="Uploaded MRI", width=350)
@@ -104,21 +127,29 @@ if uploaded_file:
     processed = preprocess_image(image)
     raw_pred = model.predict(processed, verbose=0)[0]
 
-    # Binary Output
-    p_tumor = float(raw_pred[0])
+    # -------------------------------
+    # Binary prediction
+    # -------------------------------
+    p_tumor_raw = float(raw_pred[0])
+
+    # -------------------------------
+    # Confidence Amplification
+    # -------------------------------
+    p_tumor = amplify_confidence(p_tumor_raw, gamma=gamma)
     p_notumor = 1 - p_tumor
 
-    # Apply Bias only if confidence is high
-    if p_tumor >= 0.6:
-        tumor_probs = biased_distribution(
-            p_tumor=p_tumor,
-            priors=TUMOR_PRIORS,
-            alpha=bias_strength
-        )
-    else:
-        tumor_probs = (TUMOR_PRIORS / TUMOR_PRIORS.sum()) * p_tumor
+    # -------------------------------
+    # Tumor type distribution
+    # -------------------------------
+    tumor_probs = tumor_soft_bias(
+        p_tumor=p_tumor,
+        priors=TUMOR_PRIORS,
+        beta=beta
+    )
 
-    # Final Probabilities
+    # -------------------------------
+    # Final probabilities
+    # -------------------------------
     preds = np.array([
         tumor_probs[0],   # glioma
         tumor_probs[1],   # meningioma
@@ -126,23 +157,26 @@ if uploaded_file:
         tumor_probs[2]    # pituitary
     ])
 
-    # ==========================================
-    # 📊 Display Results
-    # ==========================================
+    # Normalize (numerical safety)
+    preds = preds / preds.sum()
+
+    # =====================================================
+    # 📊 Results
+    # =====================================================
     df = pd.DataFrame({
         "Tumor Type": CLASS_NAMES,
         "Probability (%)": np.round(preds * 100, 2)
     }).sort_values(by="Probability (%)", ascending=False)
 
     st.subheader(" Prediction Probabilities")
-    st.dataframe(df, width=500)
+    st.dataframe(df, width=520)
 
     top = df.iloc[0]
     st.success(
-        f" Most Likely: **{top['Tumor Type']}** "
-        f"with confidence **{top['Probability (%)']}%**"
+        f" Most Likely Diagnosis: **{top['Tumor Type']}** "
+        f"({top['Probability (%)']}%)"
     )
-# ==========================================
-#  Footer
-# ==========================================
+# =====================================================
+# 🔻 Footer
+# =====================================================
 st.caption("Developed by Ali Ahmed Zaki")
