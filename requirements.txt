@@ -2,5 +2,7 @@ streamlit
 tensorflow
 numpy
 pandas
-opencv-python-headless
 Pillow
+opencv-python-headless
+requests
+matplotlib
